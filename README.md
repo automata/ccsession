@@ -1,5 +1,9 @@
 # ccsession
 
+<div align="center">
+   <img src="https://i.imgur.com/5taJVJu.jpeg" />
+</div>
+
 Export Claude Code sessions to HTML or Markdown files, useful to share with peers and
 understand which tools are called by CC.
 
