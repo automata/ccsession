@@ -1,0 +1,33 @@
+{
+  "name": "ccsession",
+  "version": "1.0.0",
+  "description": "Export Claude Code sessions to HTML",
+  "main": "dist/index.js",
+  "bin": {
+    "ccsession": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "export": "ts-node export-session.ts"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "export",
+    "session",
+    "html"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  }
+}
