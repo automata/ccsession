@@ -11,6 +11,7 @@ interface CLIOptions {
   template: string;
   markdown: boolean;
   project?: string;
+  output?: string;
 }
 
 interface SessionEntry {
@@ -225,6 +226,14 @@ function parseArgs(args: string[]): CLIOptions {
         console.error('Error: --project flag requires a project name');
         process.exit(1);
       }
+    } else if (arg === '--output') {
+      if (i + 1 < args.length) {
+        options.output = args[i + 1];
+        i++; // Skip the next argument as it's the output path
+      } else {
+        console.error('Error: --output flag requires a file path');
+        process.exit(1);
+      }
     } else if (arg === '--markdown') {
       options.markdown = true;
     }
@@ -244,16 +253,18 @@ Options:
   --merge              Merge all sessions into a single file (chronological order)
   --template <name>    Use template templates/<name>.html (default: default, ignored with --markdown)
   --project <name>     Export sessions from specific project instead of current directory
+  --output <path>      Custom output file path (only with --merge)
   --markdown           Output as Markdown instead of HTML
   --help, -h           Show this help message
 
 Examples:
-  ccsession                      # Export each session to separate HTML files
-  ccsession --merge              # Merge all sessions into one HTML file
-  ccsession --template compact   # Use templates/compact.html template
-  ccsession --project my-app     # Export sessions from my-app project
-  ccsession --markdown           # Export as Markdown files
-  ccsession --merge --markdown   # Merge all sessions into one Markdown file
+  ccsession                              # Export each session to separate HTML files
+  ccsession --merge                      # Merge all sessions into one HTML file
+  ccsession --template compact           # Use templates/compact.html template
+  ccsession --project my-app             # Export sessions from my-app project
+  ccsession --markdown                   # Export as Markdown files
+  ccsession --merge --markdown           # Merge all sessions into one Markdown file
+  ccsession --merge --output report.html # Merge sessions to custom file path
 
 Output directory: /tmp/claude-sessions/
 `);
@@ -263,7 +274,7 @@ function getProjectName(currentDir: string): string {
   return path.basename(currentDir);
 }
 
-function exportMergedSessions(sessionFiles: string[], outputDir: string, projectName: string, templateName: string = 'default', isMarkdown: boolean = false): void {
+function exportMergedSessions(sessionFiles: string[], outputDir: string, projectName: string, templateName: string = 'default', isMarkdown: boolean = false, customOutputPath?: string): void {
   console.log(`Merging ${sessionFiles.length} sessions chronologically...`);
   
   // Read all sessions and their entries
@@ -313,14 +324,26 @@ function exportMergedSessions(sessionFiles: string[], outputDir: string, project
   const timestamp = allSessions[0]?.timestamp || new Date().toISOString();
   const cwd = allSessions[0]?.entries.find(e => e.cwd)?.cwd || 'Unknown';
   
+  let outputFile: string;
+  
+  if (customOutputPath) {
+    outputFile = path.resolve(customOutputPath);
+    // Ensure the output directory exists
+    const outputFileDir = path.dirname(outputFile);
+    if (!fs.existsSync(outputFileDir)) {
+      fs.mkdirSync(outputFileDir, { recursive: true });
+    }
+  } else {
+    const extension = isMarkdown ? 'md' : 'html';
+    outputFile = path.join(outputDir, `${projectName}.${extension}`);
+  }
+  
   if (isMarkdown) {
-    const markdown = generateMarkdown(allEntries, summary, projectName, cwd, timestamp, outputDir);
-    const outputFile = path.join(outputDir, `${projectName}.md`);
+    const markdown = generateMarkdown(allEntries, summary, projectName, cwd, timestamp, customOutputPath ? path.dirname(outputFile) : outputDir);
     fs.writeFileSync(outputFile, markdown);
     console.log(`Merged session exported to: ${outputFile}`);
   } else {
     const html = generateHTML(allEntries, summary, projectName, cwd, timestamp, templateName, sessionSeparators);
-    const outputFile = path.join(outputDir, `${projectName}.html`);
     fs.writeFileSync(outputFile, html);
     console.log(`Merged session exported to: ${outputFile}`);
   }
@@ -479,8 +502,19 @@ function main(): void {
   console.log(`Found ${sessionFiles.length} session(s) for ${projectName}`);
   
   if (options.merge) {
-    exportMergedSessions(sessionFiles, outputDir, projectName, options.template, options.markdown);
+    // Validate --output flag usage
+    if (options.output && !options.merge) {
+      console.error('Error: --output flag can only be used with --merge');
+      process.exit(1);
+    }
+    
+    exportMergedSessions(sessionFiles, outputDir, projectName, options.template, options.markdown, options.output);
   } else {
+    // Validate --output flag usage
+    if (options.output) {
+      console.error('Error: --output flag can only be used with --merge');
+      process.exit(1);
+    }
     const fileType = options.markdown ? 'Markdown' : 'HTML';
     console.log(`Exporting ${sessionFiles.length} individual sessions as ${fileType}...`);
     
