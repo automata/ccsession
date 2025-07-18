@@ -8,6 +8,7 @@ interface CLIOptions {
   merge: boolean;
   help: boolean;
   template: string;
+  markdown: boolean;
 }
 
 interface SessionEntry {
@@ -85,11 +86,84 @@ function formatContent(content: string | Array<{ type: string; text?: string; [k
   return { html: escapeHtml(JSON.stringify(content, null, 2)), hasTools: false };
 }
 
+function escapeMarkdown(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\*/g, '\\*')
+    .replace(/_/g, '\\_')
+    .replace(/`/g, '\\`')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/\|/g, '\\|');
+}
+
+function formatContentMarkdown(content: string | Array<{ type: string; text?: string; [key: string]: any }>): string {
+  if (typeof content === 'string') {
+    return escapeMarkdown(content);
+  }
+  
+  if (Array.isArray(content)) {
+    return content.map(item => {
+      if (item.type === 'text' && item.text) {
+        return escapeMarkdown(item.text);
+      } else if (item.type === 'image' && item.source && item.source.data) {
+        return `![Image](data:${item.source.media_type || 'image/png'};base64,${item.source.data})`;
+      } else if (item.type === 'tool_use') {
+        return `\n**🔧 Tool: ${item.name || 'Unknown'}**\n\n\`\`\`json\n${JSON.stringify(item.input || {}, null, 2)}\n\`\`\`\n`;
+      } else if (item.type === 'tool_result') {
+        return `\n**📋 Tool Result**\n\n\`\`\`\n${item.content || 'No content'}\n\`\`\`\n`;
+      }
+      return `\n\`\`\`json\n${JSON.stringify(item, null, 2)}\n\`\`\`\n`;
+    }).join('');
+  }
+  
+  return `\n\`\`\`json\n${JSON.stringify(content, null, 2)}\n\`\`\`\n`;
+}
+
+function generateMarkdown(entries: SessionEntry[], summary: string, sessionId: string, cwd: string, timestamp: string): string {
+  const markdownContent = `# ${summary}
+
+**Session ID:** ${sessionId}  
+**Working Directory:** ${cwd}  
+**Timestamp:** ${new Date(timestamp).toLocaleString()}
+
+---
+
+${entries
+  .filter(entry => entry.type === 'user' || entry.type === 'assistant')
+  .map(entry => {
+    // Check if this is a tool result message (type: user but contains tool_result)
+    const hasToolResult = Array.isArray(entry.message?.content) && 
+      entry.message.content.some(item => item.type === 'tool_result');
+    
+    // If it has tool results, treat as assistant message
+    const role = hasToolResult ? 'assistant' : (entry.message?.role || entry.type);
+    const content = entry.message?.content || '';
+    const entryTimestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '';
+    
+    const roleIcon = role === 'user' ? '👤' : '🤖';
+    const formattedContent = formatContentMarkdown(content);
+    
+    return `## ${roleIcon} ${role.toUpperCase()}
+
+*${entryTimestamp}*
+
+${formattedContent}
+
+---
+`;
+  })
+  .join('\n')}`;
+
+  return markdownContent;
+}
+
 function parseArgs(args: string[]): CLIOptions {
   const options: CLIOptions = {
     merge: false,
     help: false,
-    template: 'default'
+    template: 'default',
+    markdown: false
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -107,6 +181,8 @@ function parseArgs(args: string[]): CLIOptions {
         console.error('Error: --template flag requires a template name');
         process.exit(1);
       }
+    } else if (arg === '--markdown') {
+      options.markdown = true;
     }
   }
 
@@ -115,21 +191,23 @@ function parseArgs(args: string[]): CLIOptions {
 
 function showHelp(): void {
   console.log(`
-ccsession - Export Claude Code sessions to HTML
+ccsession - Export Claude Code sessions to HTML or Markdown
 
 Usage:
   ccsession [options]
 
 Options:
-  --merge              Merge all sessions into a single HTML file (chronological order)
-  --template <name>    Use template templates/<name>.html (default: default)
+  --merge              Merge all sessions into a single file (chronological order)
+  --template <name>    Use template templates/<name>.html (default: default, ignored with --markdown)
+  --markdown           Output as Markdown instead of HTML
   --help, -h           Show this help message
 
 Examples:
   ccsession                      # Export each session to separate HTML files
   ccsession --merge              # Merge all sessions into one HTML file
   ccsession --template compact   # Use templates/compact.html template
-  ccsession --merge --template custom # Merge with custom template
+  ccsession --markdown           # Export as Markdown files
+  ccsession --merge --markdown   # Merge all sessions into one Markdown file
 
 Output directory: /tmp/claude-sessions/
 `);
@@ -139,7 +217,7 @@ function getProjectName(currentDir: string): string {
   return path.basename(currentDir);
 }
 
-function exportMergedSessions(sessionFiles: string[], outputDir: string, projectName: string, templateName: string = 'default'): void {
+function exportMergedSessions(sessionFiles: string[], outputDir: string, projectName: string, templateName: string = 'default', isMarkdown: boolean = false): void {
   console.log(`Merging ${sessionFiles.length} sessions chronologically...`);
   
   // Read all sessions and their entries
@@ -189,11 +267,17 @@ function exportMergedSessions(sessionFiles: string[], outputDir: string, project
   const timestamp = allSessions[0]?.timestamp || new Date().toISOString();
   const cwd = allSessions[0]?.entries.find(e => e.cwd)?.cwd || 'Unknown';
   
-  const html = generateHTML(allEntries, summary, projectName, cwd, timestamp, templateName, sessionSeparators);
-  
-  const outputFile = path.join(outputDir, `${projectName}.html`);
-  fs.writeFileSync(outputFile, html);
-  console.log(`Merged session exported to: ${outputFile}`);
+  if (isMarkdown) {
+    const markdown = generateMarkdown(allEntries, summary, projectName, cwd, timestamp);
+    const outputFile = path.join(outputDir, `${projectName}.md`);
+    fs.writeFileSync(outputFile, markdown);
+    console.log(`Merged session exported to: ${outputFile}`);
+  } else {
+    const html = generateHTML(allEntries, summary, projectName, cwd, timestamp, templateName, sessionSeparators);
+    const outputFile = path.join(outputDir, `${projectName}.html`);
+    fs.writeFileSync(outputFile, html);
+    console.log(`Merged session exported to: ${outputFile}`);
+  }
 }
 
 function loadTemplate(templateName: string): string {
@@ -248,7 +332,7 @@ function generateHTML(entries: SessionEntry[], summary: string, sessionId: strin
     .replace('{{MESSAGES}}', messagesHtml);
 }
 
-function exportSession(sessionFile: string, outputDir: string, templateName: string = 'default'): void {
+function exportSession(sessionFile: string, outputDir: string, templateName: string = 'default', isMarkdown: boolean = false): void {
   const sessionData = fs.readFileSync(sessionFile, 'utf-8');
   const entries: SessionEntry[] = sessionData
     .split('\n')
@@ -260,11 +344,17 @@ function exportSession(sessionFile: string, outputDir: string, templateName: str
   const timestamp = entries.find(e => e.timestamp)?.timestamp || new Date().toISOString();
   const cwd = entries.find(e => e.cwd)?.cwd || 'Unknown';
 
-  const html = generateHTML(entries, summary, sessionId, cwd, timestamp, templateName);
-  
-  const outputFile = path.join(outputDir, `${sessionId}.html`);
-  fs.writeFileSync(outputFile, html);
-  console.log(`Exported session to: ${outputFile}`);
+  if (isMarkdown) {
+    const markdown = generateMarkdown(entries, summary, sessionId, cwd, timestamp);
+    const outputFile = path.join(outputDir, `${sessionId}.md`);
+    fs.writeFileSync(outputFile, markdown);
+    console.log(`Exported session to: ${outputFile}`);
+  } else {
+    const html = generateHTML(entries, summary, sessionId, cwd, timestamp, templateName);
+    const outputFile = path.join(outputDir, `${sessionId}.html`);
+    fs.writeFileSync(outputFile, html);
+    console.log(`Exported session to: ${outputFile}`);
+  }
 }
 
 function main(): void {
@@ -308,14 +398,15 @@ function main(): void {
   console.log(`Found ${sessionFiles.length} session(s) for ${projectName}`);
   
   if (options.merge) {
-    exportMergedSessions(sessionFiles, outputDir, projectName, options.template);
+    exportMergedSessions(sessionFiles, outputDir, projectName, options.template, options.markdown);
   } else {
-    console.log(`Exporting ${sessionFiles.length} individual sessions...`);
+    const fileType = options.markdown ? 'Markdown' : 'HTML';
+    console.log(`Exporting ${sessionFiles.length} individual sessions as ${fileType}...`);
     
     sessionFiles.forEach((sessionFile, index) => {
       try {
         console.log(`   [${index + 1}/${sessionFiles.length}] Processing ${path.basename(sessionFile, '.jsonl')}...`);
-        exportSession(sessionFile, outputDir, options.template);
+        exportSession(sessionFile, outputDir, options.template, options.markdown);
       } catch (error) {
         console.error(`Error exporting ${sessionFile}:`, error);
       }
