@@ -81,3 +81,17 @@ Available HTML templates:
 ## How it works
 
 The script looks for Claude Code session files in `~/.claude/projects/` and converts them from JSONL format to styled HTML or Markdown files. By default, it uses the current directory name to find the matching project, but you can specify any project with the `--project` flag.
+
+# Developing
+
+## Publishing to NPM Registry
+
+First bump the version at `package.json`, then:
+
+```
+npm login
+git add package.json ; git commit -m "Bump version"
+git tag <version>
+git push origin main --tags
+npm publish --access public
+```
