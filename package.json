@@ -1,6 +1,6 @@
 {
   "name": "ccsession",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Export Claude Code sessions to HTML",
   "main": "dist/index.js",
   "bin": {
@@ -22,7 +22,11 @@
     "session",
     "html"
   ],
-  "author": "",
+  "author": "Vilson Vieira <vilson@void.cc> (https://void.cc)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/automata/ccsession.git"
+  },
   "license": "MIT",
   "dependencies": {
     "@types/node": "^20.0.0"
