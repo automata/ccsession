@@ -3,6 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
+import { randomUUID } from 'crypto';
 
 interface CLIOptions {
   merge: boolean;
@@ -97,7 +98,34 @@ function escapeMarkdown(text: string): string {
     .replace(/\|/g, '\\|');
 }
 
-function formatContentMarkdown(content: string | Array<{ type: string; text?: string; [key: string]: any }>): string {
+function saveBase64Image(base64Data: string, mimeType: string, outputDir: string): string {
+  const uuid = randomUUID();
+  
+  // Determine file extension from mime type
+  let extension = '.jpg';
+  if (mimeType.includes('png')) {
+    extension = '.png';
+  } else if (mimeType.includes('gif')) {
+    extension = '.gif';
+  } else if (mimeType.includes('webp')) {
+    extension = '.webp';
+  } else if (mimeType.includes('svg')) {
+    extension = '.svg';
+  }
+  
+  const filename = `${uuid}${extension}`;
+  const filepath = path.join(outputDir, filename);
+  
+  // Create buffer from base64 string
+  const buffer = Buffer.from(base64Data, 'base64');
+  
+  // Save the image file
+  fs.writeFileSync(filepath, buffer);
+  
+  return filename;
+}
+
+function formatContentMarkdown(content: string | Array<{ type: string; text?: string; [key: string]: any }>, outputDir?: string): string {
   if (typeof content === 'string') {
     return escapeMarkdown(content);
   }
@@ -107,7 +135,14 @@ function formatContentMarkdown(content: string | Array<{ type: string; text?: st
       if (item.type === 'text' && item.text) {
         return escapeMarkdown(item.text);
       } else if (item.type === 'image' && item.source && item.source.data) {
-        return `![Image](data:${item.source.media_type || 'image/png'};base64,${item.source.data})`;
+        if (outputDir) {
+          // Save image to file and return relative path
+          const filename = saveBase64Image(item.source.data, item.source.media_type || 'image/png', outputDir);
+          return `![Image](./${filename})`;
+        } else {
+          // Fallback to base64 data URL
+          return `![Image](data:${item.source.media_type || 'image/png'};base64,${item.source.data})`;
+        }
       } else if (item.type === 'tool_use') {
         return `\n**🔧 Tool: ${item.name || 'Unknown'}**\n\n\`\`\`json\n${JSON.stringify(item.input || {}, null, 2)}\n\`\`\`\n`;
       } else if (item.type === 'tool_result') {
@@ -120,7 +155,7 @@ function formatContentMarkdown(content: string | Array<{ type: string; text?: st
   return `\n\`\`\`json\n${JSON.stringify(content, null, 2)}\n\`\`\`\n`;
 }
 
-function generateMarkdown(entries: SessionEntry[], summary: string, sessionId: string, cwd: string, timestamp: string): string {
+function generateMarkdown(entries: SessionEntry[], summary: string, sessionId: string, cwd: string, timestamp: string, outputDir?: string): string {
   const markdownContent = `# ${summary}
 
 **Session ID:** ${sessionId}  
@@ -142,7 +177,7 @@ ${entries
     const entryTimestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '';
     
     const roleIcon = role === 'user' ? '👤' : '🤖';
-    const formattedContent = formatContentMarkdown(content);
+    const formattedContent = formatContentMarkdown(content, outputDir);
     
     return `## ${roleIcon} ${role.toUpperCase()}
 
@@ -268,7 +303,7 @@ function exportMergedSessions(sessionFiles: string[], outputDir: string, project
   const cwd = allSessions[0]?.entries.find(e => e.cwd)?.cwd || 'Unknown';
   
   if (isMarkdown) {
-    const markdown = generateMarkdown(allEntries, summary, projectName, cwd, timestamp);
+    const markdown = generateMarkdown(allEntries, summary, projectName, cwd, timestamp, outputDir);
     const outputFile = path.join(outputDir, `${projectName}.md`);
     fs.writeFileSync(outputFile, markdown);
     console.log(`Merged session exported to: ${outputFile}`);
@@ -345,7 +380,7 @@ function exportSession(sessionFile: string, outputDir: string, templateName: str
   const cwd = entries.find(e => e.cwd)?.cwd || 'Unknown';
 
   if (isMarkdown) {
-    const markdown = generateMarkdown(entries, summary, sessionId, cwd, timestamp);
+    const markdown = generateMarkdown(entries, summary, sessionId, cwd, timestamp, outputDir);
     const outputFile = path.join(outputDir, `${sessionId}.md`);
     fs.writeFileSync(outputFile, markdown);
     console.log(`Exported session to: ${outputFile}`);
