@@ -25,8 +25,11 @@ npx ccsession@latest --template light
 # Export from a specific project
 npx ccsession@latest --project my-app
 
+# Custom output path for merged sessions
+npx ccsession@latest --merge --output ./reports/session.html
+
 # Combine options
-npx ccsession@latest --merge --markdown --project my-app
+npx ccsession@latest --merge --markdown --project my-app --output ~/my-session.md
 
 # Show help
 npx ccsession@latest --help
@@ -37,6 +40,7 @@ npx ccsession@latest --help
 - `--merge`: Merge all sessions into a single file, sorted chronologically from oldest to newest
 - `--template <name>`: Use template `templates/<name>.html` (default: default, ignored with --markdown)
 - `--project <name>`: Export sessions from specific project instead of current directory
+- `--output <path>`: Custom output file path (only works with --merge)
 - `--markdown`: Output as Markdown instead of HTML
 - `--help, -h`: Show help message
 
