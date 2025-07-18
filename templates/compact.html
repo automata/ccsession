@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}}</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 8px;
+            line-height: 1.2;
+            color: #333;
+            background: #f8f8f8;
+        }
+        .session-header {
+            border-bottom: 2px solid #ccc;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+        .session-header h1 {
+            margin: 0;
+            font-size: 1.2em;
+            color: #333;
+        }
+        .session-info {
+            background: #eee;
+            padding: 4px 8px;
+            border-radius: 3px;
+            margin-bottom: 8px;
+            font-size: 0.8em;
+            color: #666;
+        }
+        .message {
+            margin-bottom: 8px;
+            padding: 4px 8px;
+            border-radius: 3px;
+            border-left: 2px solid #ccc;
+        }
+        .message.user {
+            background: #e8f4f8;
+            border-left-color: #007bff;
+        }
+        .message.assistant {
+            background: #f0f8f0;
+            border-left-color: #28a745;
+        }
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+            font-weight: bold;
+            font-size: 0.8em;
+        }
+        .message-role {
+            text-transform: uppercase;
+            font-size: 0.7em;
+            letter-spacing: 0.5px;
+        }
+        .user .message-role {
+            color: #007bff;
+        }
+        .assistant .message-role {
+            color: #28a745;
+        }
+        .message-timestamp {
+            font-size: 0.6em;
+            color: #999;
+        }
+        .message-content {
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+            color: #333;
+            line-height: 1.2;
+        }
+        .tool-toggle {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 2px;
+            margin: 4px 0;
+            overflow: hidden;
+        }
+        .tool-toggle-header {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+            font-size: 0.7em;
+            color: #666;
+        }
+        .tool-toggle-header:hover {
+            background: #e8e8e8;
+        }
+        .tool-toggle-content {
+            display: none;
+            padding: 6px;
+            color: #333;
+        }
+        .tool-toggle-content.show {
+            display: block;
+        }
+        .toggle-arrow {
+            transform: rotate(0deg);
+            transition: transform 0.2s ease;
+        }
+        .toggle-arrow.expanded {
+            transform: rotate(90deg);
+        }
+        pre {
+            background: #f8f8f8;
+            padding: 4px;
+            border-radius: 2px;
+            overflow-x: auto;
+            font-size: 0.7em;
+            color: #333;
+            margin: 2px 0;
+        }
+        .image-container {
+            margin: 4px 0;
+            text-align: center;
+        }
+        .message-image {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 3px;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="session-header">
+        <h1>{{SUMMARY}}</h1>
+        <div class="session-info">
+            <div><strong>ID:</strong> {{SESSION_ID}}</div>
+            <div><strong>Dir:</strong> {{CWD}}</div>
+            <div><strong>Time:</strong> {{TIMESTAMP}}</div>
+        </div>
+    </div>
+    
+    <div class="messages">
+        {{MESSAGES}}
+    </div>
+    <script>
+        function toggleTool(header) {
+            const content = header.nextElementSibling;
+            const arrow = header.querySelector('.toggle-arrow');
+            
+            if (content.classList.contains('show')) {
+                content.classList.remove('show');
+                arrow.classList.remove('expanded');
+            } else {
+                content.classList.add('show');
+                arrow.classList.add('expanded');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -4,6 +4,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 
+interface CLIOptions {
+  merge: boolean;
+  help: boolean;
+  template: string;
+}
+
 interface SessionEntry {
   type: 'user' | 'assistant' | 'summary';
   message?: {
@@ -79,7 +85,170 @@ function formatContent(content: string | Array<{ type: string; text?: string; [k
   return { html: escapeHtml(JSON.stringify(content, null, 2)), hasTools: false };
 }
 
-function exportSession(sessionFile: string, outputDir: string): void {
+function parseArgs(args: string[]): CLIOptions {
+  const options: CLIOptions = {
+    merge: false,
+    help: false,
+    template: 'default'
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if (arg === '--merge') {
+      options.merge = true;
+    } else if (arg === '--help' || arg === '-h') {
+      options.help = true;
+    } else if (arg === '--template') {
+      if (i + 1 < args.length) {
+        options.template = args[i + 1];
+        i++; // Skip the next argument as it's the template name
+      } else {
+        console.error('Error: --template flag requires a template name');
+        process.exit(1);
+      }
+    }
+  }
+
+  return options;
+}
+
+function showHelp(): void {
+  console.log(`
+ccsession - Export Claude Code sessions to HTML
+
+Usage:
+  ccsession [options]
+
+Options:
+  --merge              Merge all sessions into a single HTML file (chronological order)
+  --template <name>    Use template templates/<name>.html (default: default)
+  --help, -h           Show this help message
+
+Examples:
+  ccsession                      # Export each session to separate HTML files
+  ccsession --merge              # Merge all sessions into one HTML file
+  ccsession --template compact   # Use templates/compact.html template
+  ccsession --merge --template custom # Merge with custom template
+
+Output directory: /tmp/claude-sessions/
+`);
+}
+
+function getProjectName(currentDir: string): string {
+  return path.basename(currentDir);
+}
+
+function exportMergedSessions(sessionFiles: string[], outputDir: string, projectName: string, templateName: string = 'default'): void {
+  console.log(`Merging ${sessionFiles.length} sessions chronologically...`);
+  
+  // Read all sessions and their entries
+  const allSessions: { file: string; entries: SessionEntry[]; timestamp: string }[] = [];
+  
+  for (const sessionFile of sessionFiles) {
+    const sessionData = fs.readFileSync(sessionFile, 'utf-8');
+    const entries: SessionEntry[] = sessionData
+      .split('\n')
+      .filter(line => line.trim())
+      .map(line => JSON.parse(line));
+    
+    // Get the earliest timestamp for this session
+    const sessionTimestamp = entries
+      .filter(e => e.timestamp)
+      .map(e => e.timestamp!)
+      .sort()[0] || new Date().toISOString();
+    
+    allSessions.push({
+      file: sessionFile,
+      entries,
+      timestamp: sessionTimestamp
+    });
+  }
+  
+  // Sort sessions by timestamp (oldest first)
+  allSessions.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  
+  // Merge all entries chronologically
+  const allEntries: SessionEntry[] = [];
+  const sessionSeparators: string[] = [];
+  
+  for (let i = 0; i < allSessions.length; i++) {
+    const session = allSessions[i];
+    const sessionId = path.basename(session.file, '.jsonl');
+    
+    if (i > 0) {
+      // Add session separator
+      sessionSeparators.push(`Session ${i + 1}: ${sessionId}`);
+    }
+    
+    allEntries.push(...session.entries);
+  }
+  
+  // Get overall metadata
+  const summary = `${projectName} - All Sessions`;
+  const timestamp = allSessions[0]?.timestamp || new Date().toISOString();
+  const cwd = allSessions[0]?.entries.find(e => e.cwd)?.cwd || 'Unknown';
+  
+  const html = generateHTML(allEntries, summary, projectName, cwd, timestamp, templateName, sessionSeparators);
+  
+  const outputFile = path.join(outputDir, `${projectName}.html`);
+  fs.writeFileSync(outputFile, html);
+  console.log(`Merged session exported to: ${outputFile}`);
+}
+
+function loadTemplate(templateName: string): string {
+  const templatePath = path.join(__dirname, '..', 'templates', `${templateName}.html`);
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Template not found: ${templatePath}`);
+  }
+  return fs.readFileSync(templatePath, 'utf-8');
+}
+
+function generateHTML(entries: SessionEntry[], summary: string, sessionId: string, cwd: string, timestamp: string, templateName: string = 'default', sessionSeparators: string[] = []): string {
+  const template = loadTemplate(templateName);
+  
+  // Generate messages HTML
+  const messagesHtml = entries
+    .filter(entry => entry.type === 'user' || entry.type === 'assistant')
+    .map(entry => {
+      // Check if this is a tool result message (type: user but contains tool_result)
+      const hasToolResult = Array.isArray(entry.message?.content) && 
+        entry.message.content.some(item => item.type === 'tool_result');
+      
+      // If it has tool results, treat as assistant message
+      const role = hasToolResult ? 'assistant' : (entry.message?.role || entry.type);
+      const content = entry.message?.content || '';
+      const entryTimestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '';
+      
+      const formattedContent = formatContent(content);
+      const iconClass = role === 'user' ? 'user-icon' : (formattedContent.hasTools ? 'wrench-icon' : 'robot-icon');
+      
+      return `
+      <div class="message ${role}">
+          <div class="message-header">
+              <span class="message-role">
+                  <span class="message-icon ${iconClass}"></span>
+                  ${role}
+              </span>
+              <span class="message-timestamp">${entryTimestamp}</span>
+          </div>
+          <div class="message-content">${formattedContent.html}</div>
+      </div>
+      `;
+    })
+    .join('');
+  
+  // Replace template placeholders
+  return template
+    .replace('{{TITLE}}', escapeHtml(summary))
+    .replace('{{SUMMARY}}', escapeHtml(summary))
+    .replace('{{SESSION_ID}}', escapeHtml(sessionId))
+    .replace('{{CWD}}', escapeHtml(cwd))
+    .replace('{{TIMESTAMP}}', escapeHtml(new Date(timestamp).toLocaleString()))
+    .replace('{{MESSAGES}}', messagesHtml);
+}
+
+function exportSession(sessionFile: string, outputDir: string, templateName: string = 'default'): void {
   const sessionData = fs.readFileSync(sessionFile, 'utf-8');
   const entries: SessionEntry[] = sessionData
     .split('\n')
@@ -91,274 +260,26 @@ function exportSession(sessionFile: string, outputDir: string): void {
   const timestamp = entries.find(e => e.timestamp)?.timestamp || new Date().toISOString();
   const cwd = entries.find(e => e.cwd)?.cwd || 'Unknown';
 
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${escapeHtml(summary)}</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 12px;
-            line-height: 1.4;
-            color: #333;
-            background: #1a1a1a;
-        }
-        .session-header {
-            border-bottom: 1px solid #333;
-            padding-bottom: 12px;
-            margin-bottom: 16px;
-            color: #fff;
-        }
-        .session-info {
-            background: #2a2a2a;
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 12px;
-            font-size: 0.85em;
-            color: #ccc;
-        }
-        .message {
-            margin-bottom: 12px;
-            padding: 8px 12px;
-            border-radius: 6px;
-            border-left: 3px solid #444;
-        }
-        .message.user {
-            background: #2a2a2a;
-            border-left-color: #007bff;
-        }
-        .message.assistant {
-            background: #1e1e1e;
-            border-left-color: #28a745;
-            border: 1px solid #333;
-        }
-        .message-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-            font-weight: 600;
-            color: #888;
-            font-size: 0.85em;
-        }
-        .message-icon {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            margin-right: 6px;
-            vertical-align: middle;
-        }
-        .user-icon {
-            background: #007bff;
-            border-radius: 50%;
-            position: relative;
-        }
-        .user-icon::before {
-            content: "👤";
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 10px;
-            color: white;
-        }
-        .robot-icon {
-            background: #28a745;
-            border-radius: 3px;
-            position: relative;
-        }
-        .robot-icon::before {
-            content: "🤖";
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 10px;
-        }
-        .wrench-icon {
-            background: #ffc107;
-            border-radius: 3px;
-            position: relative;
-        }
-        .wrench-icon::before {
-            content: "🔧";
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 10px;
-        }
-        .tool-toggle {
-            background: #2a2a2a;
-            border: 1px solid #444;
-            border-radius: 4px;
-            margin: 6px 0;
-            overflow: hidden;
-        }
-        .tool-toggle-header {
-            background: #333;
-            padding: 4px 8px;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-weight: 600;
-            font-size: 0.8em;
-            color: #ccc;
-        }
-        .tool-toggle-header:hover {
-            background: #3a3a3a;
-        }
-        .tool-toggle-content {
-            display: none;
-            padding: 8px;
-            color: #ddd;
-        }
-        .tool-toggle-content.show {
-            display: block;
-        }
-        .toggle-arrow {
-            transform: rotate(0deg);
-            transition: transform 0.2s ease;
-        }
-        .toggle-arrow.expanded {
-            transform: rotate(90deg);
-        }
-        .message-role {
-            text-transform: uppercase;
-            font-size: 0.8em;
-            letter-spacing: 0.3px;
-        }
-        .user .message-role {
-            color: #007bff;
-        }
-        .assistant .message-role {
-            color: #28a745;
-        }
-        .message-timestamp {
-            font-size: 0.7em;
-            color: #666;
-        }
-        .message-content {
-            white-space: pre-wrap;
-            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
-            font-size: 0.85em;
-            color: #ddd;
-            line-height: 1.3;
-        }
-        .tool-use, .tool-result {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 4px;
-            padding: 10px;
-            margin: 10px 0;
-        }
-        .tool-use {
-            border-left: 4px solid #ffc107;
-        }
-        .tool-result {
-            border-left: 4px solid #17a2b8;
-        }
-        pre {
-            background: #1a1a1a;
-            padding: 6px;
-            border-radius: 3px;
-            overflow-x: auto;
-            font-size: 0.8em;
-            color: #ddd;
-            margin: 4px 0;
-        }
-        .unknown-content {
-            background: #2a2a1a;
-            border: 1px solid #444;
-            border-radius: 4px;
-            padding: 6px;
-            margin: 4px 0;
-            color: #ddd;
-        }
-        .image-container {
-            margin: 8px 0;
-            text-align: center;
-        }
-        .message-image {
-            max-width: 100%;
-            max-height: 400px;
-            border-radius: 6px;
-            border: 1px solid #444;
-            background: #2a2a2a;
-        }
-    </style>
-</head>
-<body>
-    <div class="session-header">
-        <h1>${escapeHtml(summary)}</h1>
-        <div class="session-info">
-            <div><strong>Session ID:</strong> ${escapeHtml(sessionId)}</div>
-            <div><strong>Working Directory:</strong> ${escapeHtml(cwd)}</div>
-            <div><strong>Timestamp:</strong> ${escapeHtml(new Date(timestamp).toLocaleString())}</div>
-        </div>
-    </div>
-    
-    <div class="messages">
-        ${entries
-          .filter(entry => entry.type === 'user' || entry.type === 'assistant')
-          .map(entry => {
-            // Check if this is a tool result message (type: user but contains tool_result)
-            const hasToolResult = Array.isArray(entry.message?.content) && 
-              entry.message.content.some(item => item.type === 'tool_result');
-            
-            // If it has tool results, treat as assistant message
-            const role = hasToolResult ? 'assistant' : (entry.message?.role || entry.type);
-            const content = entry.message?.content || '';
-            const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '';
-            
-            const formattedContent = formatContent(content);
-            const iconClass = role === 'user' ? 'user-icon' : (formattedContent.hasTools ? 'wrench-icon' : 'robot-icon');
-            
-            return `
-            <div class="message ${role}">
-                <div class="message-header">
-                    <span class="message-role">
-                        <span class="message-icon ${iconClass}"></span>
-                        ${role}
-                    </span>
-                    <span class="message-timestamp">${timestamp}</span>
-                </div>
-                <div class="message-content">${formattedContent.html}</div>
-            </div>
-            `;
-          })
-          .join('')}
-    </div>
-    <script>
-        function toggleTool(header) {
-            const content = header.nextElementSibling;
-            const arrow = header.querySelector('.toggle-arrow');
-            
-            if (content.classList.contains('show')) {
-                content.classList.remove('show');
-                arrow.classList.remove('expanded');
-            } else {
-                content.classList.add('show');
-                arrow.classList.add('expanded');
-            }
-        }
-    </script>
-</body>
-</html>`;
-
+  const html = generateHTML(entries, summary, sessionId, cwd, timestamp, templateName);
+  
   const outputFile = path.join(outputDir, `${sessionId}.html`);
   fs.writeFileSync(outputFile, html);
   console.log(`Exported session to: ${outputFile}`);
 }
 
 function main(): void {
+  const options = parseArgs(process.argv.slice(2));
+  
+  if (options.help) {
+    showHelp();
+    process.exit(0);
+  }
+  
   const currentDir = process.cwd();
+  const projectName = getProjectName(currentDir);
   const claudeDir = path.join(homedir(), '.claude', 'projects');
+  
+  console.log(`Looking for Claude sessions in: ${projectName}`);
   
   // Convert current directory path to match Claude's folder naming convention
   const projectDirName = currentDir.replace(/\//g, '-');
@@ -384,17 +305,24 @@ function main(): void {
     process.exit(1);
   }
   
-  console.log(`Found ${sessionFiles.length} session(s) for ${currentDir}`);
+  console.log(`Found ${sessionFiles.length} session(s) for ${projectName}`);
   
-  sessionFiles.forEach(sessionFile => {
-    try {
-      exportSession(sessionFile, outputDir);
-    } catch (error) {
-      console.error(`Error exporting ${sessionFile}:`, error);
-    }
-  });
-  
-  console.log(`All sessions exported to: ${outputDir}`);
+  if (options.merge) {
+    exportMergedSessions(sessionFiles, outputDir, projectName, options.template);
+  } else {
+    console.log(`Exporting ${sessionFiles.length} individual sessions...`);
+    
+    sessionFiles.forEach((sessionFile, index) => {
+      try {
+        console.log(`   [${index + 1}/${sessionFiles.length}] Processing ${path.basename(sessionFile, '.jsonl')}...`);
+        exportSession(sessionFile, outputDir, options.template);
+      } catch (error) {
+        console.error(`Error exporting ${sessionFile}:`, error);
+      }
+    });
+    
+    console.log(`All sessions exported to: ${outputDir}`);
+  }
 }
 
 if (require.main === module) {

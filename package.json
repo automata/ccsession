@@ -12,7 +12,8 @@
     "export": "ts-node export-session.ts"
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "templates/**/*"
   ],
   "keywords": [
     "claude",
