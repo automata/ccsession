@@ -1,6 +1,6 @@
 {
   "name": "ccsession",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Export Claude Code sessions to HTML",
   "main": "dist/index.js",
   "bin": {
